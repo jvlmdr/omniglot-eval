@@ -9,8 +9,8 @@ import numpy as np
 import pprint
 import torch
 import torch.nn as nn
+import torchvision
 import torchvision.datasets.omniglot as omniglot
-import PIL
 
 
 def main():
@@ -19,21 +19,37 @@ def main():
     if args.arch == 'koch':
         embed_dim = 4096
         siamese = Siamese(KochEmbeddingNet(embed_dim), embed_dim)
-        kwargs = dict(resize=False)
+        image_transform = None
     elif args.arch == 'vinyals':
         embed_dim = 64
         siamese = Siamese(VinyalsEmbeddingNet(embed_dim), embed_dim)
-        kwargs = dict(resize=True, image_size=28)
+        image_transform = torchvision.transforms.Resize((28, 28))
     else:
         raise ValueError('unknown arch: "{}"'.format(arch))
-    predictor = MostSimilar(siamese)
-    dataset_train = OmniglotDataset(omniglot.Omniglot(args.data_dir, background=True), **kwargs)
-    dataset_test = OmniglotDataset(omniglot.Omniglot(args.data_dir, background=False), **kwargs)
 
+    predictor = MostSimilar(siamese)
     parameters = list(siamese.parameters())
     print('model parameters:')
     pprint.pprint([x.shape for x in parameters])
     optimizer = torch.optim.SGD(parameters, lr=1e-2, momentum=0.9)
+
+    if args.resplit:
+        entire_dataset = load_both_and_merge(
+            args.data_dir,
+            transform=image_transform,
+            download=args.download)
+        dataset_train, dataset_test = split_classes(entire_dataset, [0.8, 0.2])
+    else:
+        dataset_train = from_torchvision(torchvision.datasets.omniglot.Omniglot(
+            args.data_dir,
+            background=True,
+            transform=image_transform,
+            download=args.download))
+        dataset_test = from_torchvision(torchvision.datasets.omniglot.Omniglot(
+            args.data_dir,
+            background=False,
+            transform=image_transform,
+            download=args.download))
 
     examples = PairSampler(dataset_train,
                            np.random.RandomState(seed=args.train_seed),
@@ -41,25 +57,19 @@ def main():
                            mode=args.train_sample_mode)
     train(siamese, examples, optimizer, args.num_train_steps)
 
-    problems = FewShotSampler(dataset_test,
-                              np.random.RandomState(seed=args.test_seed),
-                              mode='uniform',
-                              k=args.num_classes,
-                              n_train=args.num_shots,
-                              n_test=1)
-    test(predictor, problems, num_problems=args.num_test_problems)
-
-    problems = FewShotSampler(dataset_test,
-                              np.random.RandomState(seed=args.test_seed),
-                              mode='within_alphabet',
-                              k=args.num_classes,
-                              n_train=args.num_shots,
-                              n_test=1)
-    test(predictor, problems, num_problems=args.num_test_problems)
+    for mode in args.test_sample_modes:
+        problems = FewShotSampler(dataset_test,
+                                  np.random.RandomState(seed=args.test_seed),
+                                  mode=mode,
+                                  k=args.num_classes,
+                                  n_train=args.num_shots,
+                                  n_test=1)
+        test(predictor, problems, num_problems=args.num_test_problems)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--download', action='store_true')
     parser.add_argument('--arch', default='vinyals')
     parser.add_argument('--num_train_steps', type=int, default=int(1e4))
     parser.add_argument('--batch_size', type=int, default=16)
@@ -67,7 +77,10 @@ def parse_args():
     parser.add_argument('-k', '--num_classes', type=int, default=20)
     parser.add_argument('-n', '--num_shots', type=int, default=1)
     parser.add_argument('--data_dir', default='data')
+    parser.add_argument('-s', '--resplit', action='store_true')
     parser.add_argument('--train_sample_mode', default='uniform')
+    parser.add_argument('--test_sample_modes', nargs='+',
+                        default=['uniform', 'within_alphabet'])
     parser.add_argument('--train_seed', type=int, default=0)
     parser.add_argument('--test_mode', default='uniform')
     parser.add_argument('--test_seed', type=int, default=0)
@@ -145,41 +158,41 @@ def flatten_few_shot_examples(inputs, shuffle=False):
     return inputs_flat, labels_flat
 
 
+def from_torchvision(dataset):
+    print('loading images...')
+    images = []
+    labels = []
+    for im, label in dataset:
+        images.append(im)
+        labels.append(label)
+    print('converting images...')
+    images = [_im2arr(im) for im in images]
+    print('done: load images')
+    return OmniglotDataset(dataset._alphabets, dataset._characters, images, labels)
+
+
 class OmniglotDataset(object):
     '''
-    Pre-loads all images into memory.
-    Optionally resizes images when loading.
+    Contains all images in memory.
     Builds indices for efficient sampling.
     '''
 
-    def __init__(self, dataset, resize=False, image_size=None):
-        self._resize = resize
-        self._image_size = image_size
-        self.alphabets = dataset._alphabets
-        self.characters = dataset._characters
-        self.images = None
-        self.labels = [label for _, label in dataset._flat_character_images]
+    def __init__(self, alphabets, characters, images, labels):
+        self.alphabets = alphabets
+        self.characters = characters
+        self.images = images
+        self.labels = labels
         self._build_index()
-        self._load_images(dataset)
-
-    def _load_images(self, dataset):
-        print('loading images...')
-        ims = [im for im, label in dataset]
-        if self._resize:
-            print('resizing images...')
-            size = _two_tuple(self._image_size)
-            ims = [im.resize(size, resample=PIL.Image.BILINEAR) for im in ims]
-        print('converting images...')
-        ims = [_im2arr(im) for im in ims]
-        print('done: load images')
-        self.images = ims
 
     def _build_index(self):
-        alphabet_chars = {alphabet: [] for alphabet in self.alphabets}
-        for char_index, char_name in enumerate(self.characters):
-            alphabet, _ = char_name.split('/')
-            alphabet_chars[alphabet].append(char_index)
-        self.alphabet_chars = alphabet_chars
+        if self.alphabets:
+            alphabet_chars = {alphabet: [] for alphabet in self.alphabets}
+            for char_index, char_name in enumerate(self.characters):
+                alphabet, _ = char_name.split('/')
+                alphabet_chars[alphabet].append(char_index)
+            self.alphabet_chars = alphabet_chars
+        else:
+            self.alphabet_chars = None
 
         # Get index for self.images and self.labels.
         char_instances = {char: [] for char in range(len(self.characters))}
@@ -297,6 +310,66 @@ class FewShotSampler(object):
         return train_ims, test_ims, labels
 
 
+def load_both_and_merge(data_dir, **kwargs):
+    '''Merge background and evaluation sets into a single OmniglotDataset.'''
+    assert 'target_transform' not in kwargs
+    a = omniglot.Omniglot(data_dir, background=True, **kwargs)
+    b = omniglot.Omniglot(
+        data_dir, background=False,
+        target_transform=functools.partial(lambda offset, i: offset + i, len(a._characters)),
+        **kwargs,
+    )
+    merge = a + b
+    merge._alphabets = a._alphabets + b._alphabets
+    merge._characters = a._characters + b._characters
+    return from_torchvision(merge)
+
+
+def split_classes(dataset, p, seed=0):
+    '''
+    Example:
+        train, test = split_classes(dataset, [0.8, 0.2])
+    '''
+    num_chars = len(dataset.characters)
+    num_subsets = len(p)
+
+    chars = np.arange(num_chars)
+    rand = np.random.RandomState(seed)
+    rand.shuffle(chars)
+
+    p = (1 / np.sum(p)) * np.asfarray(p)
+    cdf = np.cumsum(p)
+    stops = [0] + [int(round(x)) for x in cdf * num_chars]
+    subsets = [chars[stops[i]:stops[i+1]] for i in range(num_subsets)]
+    assert sum(map(len, subsets)) == num_chars
+
+    # Split images based on label.
+    images = [[] for i in range(num_subsets)]
+    labels = [[] for i in range(num_subsets)]
+    subset_lookup = {}
+    for i in range(num_subsets):
+        for char in subsets[i]:
+            subset_lookup[char] = i
+    for im, label in zip(dataset.images, dataset.labels):
+        i = subset_lookup[label]
+        images[i].append(im)
+        labels[i].append(label)
+    # Re-number labels within subset.
+    for i in range(num_subsets):
+        index_map = _inv_map(subsets[i])
+        labels[i] = list(map(index_map.__getitem__, labels[i]))
+
+    names = [[dataset.characters[char] for char in subsets[i]] for i in range(num_subsets)]
+    return [OmniglotDataset(None, names[i], images[i], labels[i]) for i in range(num_subsets)]
+
+
+def _inv_map(x):
+    r = {}
+    for i, xi in enumerate(x):
+        r[xi] = i
+    return r
+
+
 class MostSimilar(nn.Module):
     '''Takes maximum similarity in each class.'''
 
@@ -411,6 +484,8 @@ def unflatten_batch(y, batch_shape):
 
 class VinyalsEmbeddingNet(nn.Module):
     # https://github.com/jakesnell/prototypical-networks/blob/master/protonets/models/few_shot.py 
+
+    # TODO: Dimension should be 32 not 28 to cover image well?
 
     def __init__(self, hidden_channels=64):
         super(VinyalsEmbeddingNet, self).__init__()

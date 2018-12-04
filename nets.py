@@ -11,14 +11,14 @@ import util
 class MostSimilar(nn.Module):
     '''Takes maximum similarity in each class.'''
 
-    def __init__(self, similarity_fn):
+    def __init__(self, similar_fn):
         '''
         Args:
-            similarity_fn:
+            similar_fn:
                 Maps tensors of size [batch_dims, feature_dims] to [batch_dims, 1]
         '''
         super(MostSimilar, self).__init__()
-        self.similarity_fn = similarity_fn
+        self.similar_fn = similar_fn
 
     def forward(self, train_inputs, test_inputs):
         '''
@@ -36,19 +36,98 @@ class MostSimilar(nn.Module):
         test_inputs = torch.unsqueeze(test_inputs, 2)
         # train_inputs: [b, 1, k, n, ...]
         # test_inputs:  [b, m, 1, 1, ...]
-        match_scores = self.similarity_fn(train_inputs, test_inputs)
+        match_scores = self.similar_fn(train_inputs, test_inputs)
         # match_scores: [b, m, k, n, 1]
         class_scores, _ = torch.max(match_scores, dim=3, keepdim=False)
         _, labels = torch.max(class_scores, dim=2, keepdim=False)
         return labels
 
 
+class Dot(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(Dot, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = torch.mean(x * y, dim=-1, keepdim=True)
+        output = self.adjust(output)
+        return unflatten(output)
+
+
+class Cosine(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(Cosine, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        xy = torch.sum(x * y, dim=-1, keepdim=True)
+        xx = torch.sum(x ** 2, dim=-1, keepdim=True)
+        yy = torch.sum(y ** 2, dim=-1, keepdim=True)
+        eps = 1e-3
+        output = xy / (torch.sqrt(xx) * torch.sqrt(yy) + eps)
+        output = self.adjust(output)
+        return unflatten(output)
+
+
+class L1(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(L1, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = -torch.mean(torch.abs(x - y), dim=-1, keepdim=True)
+        output = self.adjust(output)
+        return unflatten(output)
+
+
+class WeightedL1(nn.Module):
+
+    def __init__(self, use_bnorm, n):
+        super(WeightedL1, self).__init__()
+        if use_bnorm:
+            self.net = nn.Sequential(nn.BatchNorm1d(n), nn.Linear(n, 1))
+        else:
+            self.net = nn.Sequential(nn.Linear(n, 1))
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = self.net(torch.abs(x - y))
+        return unflatten(output)
+
+
 class Siamese(nn.Module):
 
-    def __init__(self, embed, embed_dim):
+    def __init__(self, embed_fn, similar_fn):
         super(Siamese, self).__init__()
-        self.embed = embed
-        self.postproc = nn.Linear(embed_dim, 1)
+        self.embed_fn = embed_fn
+        self.similar_fn = similar_fn
 
     def forward(self, images_a, images_b):
         '''
@@ -58,11 +137,9 @@ class Siamese(nn.Module):
         '''
         images_a, images_b = torch.distributions.utils.broadcast_all(images_a, images_b)
         # Flatten batch to evaluate conv-net.
-        feat_a = util.map_images(self.embed, images_a)
-        feat_b = util.map_images(self.embed, images_b)
-        delta = torch.abs(feat_a - feat_b)
-        output = self.postproc(delta)
-        return output
+        feat_a = util.map_images(self.embed_fn, images_a)
+        feat_b = util.map_images(self.embed_fn, images_b)
+        return self.similar_fn(feat_a, feat_b)
 
 
 # For fully-connected layers, following pattern in:

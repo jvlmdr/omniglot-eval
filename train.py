@@ -3,8 +3,6 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
-import functools
-import itertools
 import numpy as np
 import pprint
 import torch
@@ -22,15 +20,17 @@ def main():
 
     if args.arch == 'koch':
         embed_dim = 4096
-        siamese = nets.Siamese(nets.KochEmbedding(embed_dim), embed_dim)
+        embed_fn = nets.KochEmbedding(embed_dim)
         image_pre_transform = None
     elif args.arch == 'vinyals':
         embed_dim = 64
-        siamese = nets.Siamese(nets.VinyalsEmbedding(embed_dim), embed_dim)
+        embed_fn = nets.VinyalsEmbedding(embed_dim)
         image_pre_transform = transforms.Resize((24, 24))
     else:
         raise ValueError('unknown arch: "{}"'.format(arch))
 
+    similar_fn = getattr(nets, args.join)(use_bnorm=args.join_bnorm, n=embed_dim)
+    siamese = nets.Siamese(embed_fn, similar_fn)
     siamese.to(device)
     predictor = nets.MostSimilar(siamese)
     parameters = list(siamese.parameters())
@@ -38,35 +38,7 @@ def main():
     pprint.pprint([x.shape for x in parameters])
     optimizer = torch.optim.SGD(parameters, lr=1e-2, momentum=0.9)
 
-    if args.split == 'vinyals':
-        entire_dataset = data.load_both_and_merge(
-            args.data_dir,
-            transform=image_pre_transform,
-            download=args.download)
-        alphabets_train = util.open_and_read('splits/vinyals/trainval.txt')
-        alphabets_test = util.open_and_read('splits/vinyals/test.txt')
-        dataset_train = data.subset_alphabets(entire_dataset, alphabets_train)
-        dataset_test = data.subset_alphabets(entire_dataset, alphabets_test)
-    elif args.split == 'mix':
-        entire_dataset = data.load_both_and_merge(
-            args.data_dir,
-            transform=image_pre_transform,
-            download=args.download)
-        dataset_train, dataset_test = data.split_classes(entire_dataset, [0.8, 0.2])
-    elif args.split == 'lake':
-        dataset_train = data.from_torchvision(omniglot.Omniglot(
-            args.data_dir,
-            background=True,
-            transform=image_pre_transform,
-            download=args.download))
-        dataset_test = data.from_torchvision(omniglot.Omniglot(
-            args.data_dir,
-            background=False,
-            transform=image_pre_transform,
-            download=args.download))
-    else:
-        raise ValueError('unknown split: "{}"'.format(args.split))
-
+    dataset_train, dataset_test = load_datasets(args, transform=image_pre_transform)
     image_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (1.0,)),
@@ -90,6 +62,38 @@ def main():
             n_test=1,
             transform=image_transform)
         test(predictor, problems, num_problems=args.num_test_problems, device=device)
+
+
+def load_datasets(args, transform=None):
+    if args.split == 'vinyals':
+        entire_dataset = data.load_both_and_merge(
+            args.data_dir,
+            transform=transform,
+            download=args.download)
+        alphabets_train = util.open_and_read('splits/vinyals/trainval.txt')
+        alphabets_test = util.open_and_read('splits/vinyals/test.txt')
+        dataset_train = data.subset_alphabets(entire_dataset, alphabets_train)
+        dataset_test = data.subset_alphabets(entire_dataset, alphabets_test)
+    elif args.split == 'mix':
+        entire_dataset = data.load_both_and_merge(
+            args.data_dir,
+            transform=transform,
+            download=args.download)
+        dataset_train, dataset_test = data.split_classes(entire_dataset, [0.8, 0.2])
+    elif args.split == 'lake':
+        dataset_train = data.from_torchvision(omniglot.Omniglot(
+            args.data_dir,
+            background=True,
+            transform=transform,
+            download=args.download))
+        dataset_test = data.from_torchvision(omniglot.Omniglot(
+            args.data_dir,
+            background=False,
+            transform=transform,
+            download=args.download))
+    else:
+        raise ValueError('unknown split: "{}"'.format(args.split))
+    return dataset_train, dataset_test
 
 
 def train(model, examples, optimizer, num_steps, device=None):
@@ -132,6 +136,8 @@ def parse_args():
     parser.add_argument('--download', action='store_true')
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--arch', default='vinyals')
+    parser.add_argument('--join', default='WeightedL1')
+    parser.add_argument('--no_join_bnorm', dest='join_bnorm', action='store_false')
     parser.add_argument('--num_train_steps', type=int, default=int(1e4))
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_test_problems', type=int, default=int(1e3))

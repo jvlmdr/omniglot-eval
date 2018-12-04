@@ -5,6 +5,7 @@ from __future__ import print_function
 import functools
 import numpy as np
 import torch
+from torchvision import transforms
 from torchvision.datasets import omniglot
 
 
@@ -15,8 +16,6 @@ def from_torchvision(dataset):
     for im, label in dataset:
         images.append(im)
         labels.append(label)
-    print('converting images...')
-    images = [_im2arr(im) for im in images]
     print('done: load images')
     return OmniglotDataset(dataset._alphabets, dataset._characters, images, labels)
 
@@ -51,21 +50,19 @@ class OmniglotDataset(object):
         self.char_instances = char_instances
 
 
-def _im2arr(x):
-    x = np.array(x).astype(np.float32) / 255.0
-    assert len(x.shape) == 2
-    x = x[None, :, :]
-    return x
-
-
 class PairSampler(torch.utils.data.Sampler):
 
-    def __init__(self, dataset, rand, batch_size, prob_pos=0.5, mode='uniform'):
+    def __init__(self, dataset, rand, batch_size, prob_pos=0.5, mode='uniform', transform=None):
+        '''
+        Args:
+            transform: None, or must convert PIL image to torch Tensor.
+        '''
         self._dataset = dataset
         self._rand = rand
         self._batch_size = batch_size
         self._prob_pos = prob_pos
         self._mode = mode
+        self._transform = transform or transforms.ToTensor()
 
     def __iter__(self):
         return self
@@ -100,18 +97,27 @@ class PairSampler(torch.utils.data.Sampler):
                 # Load one image from each class.
                 examples = [self._rand.choice(self._dataset.char_instances[char]) for char in pair]
             im0, im1 = [self._dataset.images[i] for i in examples]
-            label = [float(is_pos)]
+            im0 = self._transform(im0)
+            im1 = self._transform(im1)
+            label = torch.tensor([float(is_pos)])
             batch_im0.append(im0)
             batch_im1.append(im1)
             batch_label.append(label)
+
+        batch_im0 = torch.stack(batch_im0)
+        batch_im1 = torch.stack(batch_im1)
+        batch_label = torch.stack(batch_label)
         return batch_im0, batch_im1, batch_label
 
 
 class FewShotSampler(object):
 
-    def __init__(self, dataset, rand, mode, k, n_train, n_test):
+    def __init__(self, dataset, rand, mode, k, n_train, n_test, transform=None):
         '''
         Builds necessary indices for efficient sampling.
+
+        Args:
+            transform: None, or must convert PIL image to torch Tensor.
         '''
         self._dataset = dataset
         self._rand = rand
@@ -119,6 +125,7 @@ class FewShotSampler(object):
         self._k = k
         self._n_train = n_train
         self._n_test = n_test
+        self._transform = transform or transforms.ToTensor()
 
     def __iter__(self):
         return self
@@ -149,18 +156,22 @@ class FewShotSampler(object):
         # TODO: Support using characters all drawn by same author?
         # Sample a random n instances for each character.
         n = self._n_train + self._n_test
-        ims = []
+        train_ims = []
+        test_ims = []
         for char in chars:
             char_ims = []
             instances = self._rand.choice(self._dataset.char_instances[char], n, replace=False)
             for index in instances:
-                char_ims.append(self._dataset.images[index])
-            ims.append(char_ims)
-        ims = np.asarray(ims)
+                im = self._dataset.images[index]
+                im = self._transform(im)
+                char_ims.append(im)
+            # Take first `n_train` for training, rest for testing.
+            train_ims.append(torch.stack(char_ims[:self._n_train]))
+            test_ims.append(torch.stack(char_ims[self._n_train:]))
+        train_ims = torch.stack(train_ims)
+        test_ims = torch.stack(test_ims)
 
-        train_ims = ims[:, :self._n_train]
-        test_ims = ims[:, self._n_train:]
-        labels = chars[:, None]
+        labels = torch.tensor(chars)[:, None]
         return train_ims, test_ims, labels
 
 

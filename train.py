@@ -26,7 +26,7 @@ def main():
     elif args.arch == 'vinyals':
         embed_dim = 64
         siamese = nets.Siamese(nets.VinyalsEmbedding(embed_dim), embed_dim)
-        image_pre_transform = transforms.Resize((28, 28))
+        image_pre_transform = transforms.Resize((24, 24))
     else:
         raise ValueError('unknown arch: "{}"'.format(arch))
 

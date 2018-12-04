@@ -72,12 +72,10 @@ class Siamese(nn.Module):
 class VinyalsEmbedding(nn.Module):
     # https://github.com/jakesnell/prototypical-networks/blob/master/protonets/models/few_shot.py 
 
-    # TODO: Dimension should be 32 not 28 to cover image well?
-
     def __init__(self, hidden_channels=64):
         super(VinyalsEmbedding, self).__init__()
 
-        def module(in_channels, out_channels):
+        def block(in_channels, out_channels):
             return nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, 3, padding=1),
                 nn.BatchNorm2d(out_channels),
@@ -86,15 +84,16 @@ class VinyalsEmbedding(nn.Module):
             )
 
         self.conv_net = nn.Sequential(
-            # 28
-            module(1, hidden_channels),
-            # 14 = 28 // 2
-            module(hidden_channels, hidden_channels),
-            # 7 = 14 // 2
-            module(hidden_channels, hidden_channels),
-            # 3 = 7 // 2
-            module(hidden_channels, hidden_channels),
-            # 1 = 3 // 2
+            # 28 (ideal 24)
+            block(1, hidden_channels),
+            # 14 = 28 // 2 (ideal 12 = 24 // 2)
+            block(hidden_channels, hidden_channels),
+            # 7 = 14 // 2 (ideal 6 = 12 // 2)
+            block(hidden_channels, hidden_channels),
+            # 3 = 7 // 2 (ideal 3 = 6 // 2)
+            # block(hidden_channels, hidden_channels),
+            nn.Conv2d(hidden_channels, hidden_channels, 3),
+            # 1
         )
 
     def forward(self, x):

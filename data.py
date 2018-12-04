@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import itertools
 import functools
 import numpy as np
 import torch
@@ -27,6 +28,13 @@ class OmniglotDataset(object):
     '''
 
     def __init__(self, alphabets, characters, images, labels):
+        '''
+        Args:
+            alphabets: List of strings.
+            characters: List of strings.
+            images: List of images.
+            labels: List of character indices.
+        '''
         self.alphabets = alphabets
         self.characters = characters
         self.images = images
@@ -34,6 +42,11 @@ class OmniglotDataset(object):
         self._build_index()
 
     def _build_index(self):
+        '''
+        Creates:
+            alphabet_chars: Map from string to list of character indices.
+            char_instances: Map from character index to list of example indices.
+        '''
         if self.alphabets:
             alphabet_chars = {alphabet: [] for alphabet in self.alphabets}
             for char_index, char_name in enumerate(self.characters):
@@ -197,6 +210,24 @@ def load_both_and_merge(data_dir, **kwargs):
     return from_torchvision(merge)
 
 
+def subset_alphabets(dataset, alphabets):
+    # Identify subset of characters (by index) which will be kept.
+    char_subset = list(itertools.chain.from_iterable(
+        dataset.alphabet_chars[a] for a in alphabets))
+    new_index = _inv_map(enumerate(char_subset))
+    # Take subset of characters.
+    characters = [dataset.characters[i] for i in char_subset]
+    # Take subset of images where label is in subset.
+    char_subset_unordered = set(char_subset)
+    images = []
+    labels = []
+    for image, label in zip(dataset.images, dataset.labels):
+        if label in char_subset_unordered:
+            images.append(image)
+            labels.append(new_index[label])
+    return OmniglotDataset(alphabets, characters, images, labels)
+
+
 def split_classes(dataset, p, seed=0):
     '''
     Example:
@@ -228,15 +259,15 @@ def split_classes(dataset, p, seed=0):
         labels[i].append(label)
     # Re-number labels within subset.
     for i in range(num_subsets):
-        index_map = _inv_map(subsets[i])
+        index_map = _inv_map(enumerate(subsets[i]))
         labels[i] = list(map(index_map.__getitem__, labels[i]))
 
     names = [[dataset.characters[char] for char in subsets[i]] for i in range(num_subsets)]
     return [OmniglotDataset(None, names[i], images[i], labels[i]) for i in range(num_subsets)]
 
 
-def _inv_map(x):
+def _inv_map(items):
     r = {}
-    for i, xi in enumerate(x):
+    for i, xi in items:
         r[xi] = i
     return r

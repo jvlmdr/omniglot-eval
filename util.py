@@ -89,3 +89,8 @@ class MeanAccumulator(object):
 
     def mean(self):
         return self.total / self.count
+
+
+def open_and_read(fname):
+    with open(fname, 'r') as f:
+        return [line.strip() for line in f.readlines()]

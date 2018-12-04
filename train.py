@@ -38,13 +38,22 @@ def main():
     pprint.pprint([x.shape for x in parameters])
     optimizer = torch.optim.SGD(parameters, lr=1e-2, momentum=0.9)
 
-    if args.resplit:
+    if args.split == 'vinyals':
+        entire_dataset = data.load_both_and_merge(
+            args.data_dir,
+            transform=image_pre_transform,
+            download=args.download)
+        alphabets_train = util.open_and_read('splits/vinyals/trainval.txt')
+        alphabets_test = util.open_and_read('splits/vinyals/test.txt')
+        dataset_train = data.subset_alphabets(entire_dataset, alphabets_train)
+        dataset_test = data.subset_alphabets(entire_dataset, alphabets_test)
+    elif args.split == 'mix':
         entire_dataset = data.load_both_and_merge(
             args.data_dir,
             transform=image_pre_transform,
             download=args.download)
         dataset_train, dataset_test = data.split_classes(entire_dataset, [0.8, 0.2])
-    else:
+    elif args.split == 'lake':
         dataset_train = data.from_torchvision(omniglot.Omniglot(
             args.data_dir,
             background=True,
@@ -55,6 +64,8 @@ def main():
             background=False,
             transform=image_pre_transform,
             download=args.download))
+    else:
+        raise ValueError('unknown split: "{}"'.format(args.split))
 
     image_transform = transforms.Compose([
         transforms.ToTensor(),
@@ -127,7 +138,7 @@ def parse_args():
     parser.add_argument('-k', '--num_classes', type=int, default=20)
     parser.add_argument('-n', '--num_shots', type=int, default=1)
     parser.add_argument('--data_dir', default='data')
-    parser.add_argument('-s', '--resplit', action='store_true')
+    parser.add_argument('-s', '--split', default='lake')
     parser.add_argument('--train_sample_mode', default='uniform')
     parser.add_argument('--test_sample_modes', nargs='+',
                         default=['uniform', 'within_alphabet'])

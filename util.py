@@ -94,3 +94,13 @@ class MeanAccumulator(object):
 def open_and_read(fname):
     with open(fname, 'r') as f:
         return [line.strip() for line in f.readlines()]
+
+
+def strtobool(s):
+    s = s.lower().strip()
+    if s in ('true', 't', 'yes', 'y', '1'):
+        return True
+    elif s in ('false', 'f', 'no', 'n', '0'):
+        return False
+    else:
+        raise ValueError('cannot cast to bool: "{}"'.format(s))

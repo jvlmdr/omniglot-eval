@@ -137,7 +137,7 @@ def parse_args():
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--arch', default='vinyals')
     parser.add_argument('--join', default='WeightedL1')
-    parser.add_argument('--no_join_bnorm', dest='join_bnorm', action='store_false')
+    parser.add_argument('--join_bnorm', type=util.strtobool, default=True)
     parser.add_argument('--num_train_steps', type=int, default=int(1e4))
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_test_problems', type=int, default=int(1e3))

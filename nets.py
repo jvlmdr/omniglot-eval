@@ -51,6 +51,8 @@ class Dot(nn.Module):
             self.adjust = nn.BatchNorm1d(1)
         else:
             self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
 
     def forward(self, x, y):
         x, y = torch.distributions.utils.broadcast_all(x, y)
@@ -70,6 +72,8 @@ class Cosine(nn.Module):
             self.adjust = nn.BatchNorm1d(1)
         else:
             self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
 
     def forward(self, x, y):
         x, y = torch.distributions.utils.broadcast_all(x, y)
@@ -93,6 +97,8 @@ class L1(nn.Module):
             self.adjust = nn.BatchNorm1d(1)
         else:
             self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
 
     def forward(self, x, y):
         x, y = torch.distributions.utils.broadcast_all(x, y)

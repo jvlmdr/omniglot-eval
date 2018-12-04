@@ -18,6 +18,7 @@ import util
 
 def main():
     args = parse_args()
+    device = torch.device(args.device)
 
     if args.arch == 'koch':
         embed_dim = 4096
@@ -30,6 +31,7 @@ def main():
     else:
         raise ValueError('unknown arch: "{}"'.format(arch))
 
+    siamese.to(device)
     predictor = nets.MostSimilar(siamese)
     parameters = list(siamese.parameters())
     print('model parameters:')
@@ -65,7 +67,7 @@ def main():
         batch_size=args.batch_size,
         mode=args.train_sample_mode,
         transform=image_transform)
-    train(siamese, examples, optimizer, args.num_train_steps)
+    train(siamese, examples, optimizer, args.num_train_steps, device=device)
 
     for mode in args.test_sample_modes:
         problems = data.FewShotSampler(
@@ -76,14 +78,15 @@ def main():
             n_train=args.num_shots,
             n_test=1,
             transform=image_transform)
-        test(predictor, problems, num_problems=args.num_test_problems)
+        test(predictor, problems, num_problems=args.num_test_problems, device=device)
 
 
-def train(model, examples, optimizer, num_steps):
+def train(model, examples, optimizer, num_steps, device=None):
     model.train()
 
     for i, (im0, im1, target) in zip(range(num_steps), examples):
-        # im0, im1, target = im0.to(device), im1.to(device), target.to(device)
+        if device:
+            im0, im1, target = im0.to(device), im1.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(im0, im1)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(output, target)
@@ -92,19 +95,19 @@ def train(model, examples, optimizer, num_steps):
         print('step {:d}, loss {:.3g}'.format(i, loss.item()))
 
 
-def test(model, problems, num_problems, log_interval=100):
+def test(model, problems, num_problems, device=None, log_interval=100):
     model.eval()
     accuracy = util.MeanAccumulator()
 
     for i, (train_ims, test_ims, _) in zip(range(num_problems), problems):
-        # Add batch dimension.
-        train_ims = torch.unsqueeze(train_ims, 0)
-        test_ims = torch.unsqueeze(test_ims, 0)
+        if device:
+            train_ims, test_ims = train_ims.to(device), test_ims.to(device)
         b = train_ims.shape[0]
         n = train_ims.shape[2]
         # Flatten test examples.
         test_ims, gt = util.flatten_few_shot_examples(test_ims)
         pred = model(train_ims, test_ims)
+        pred, gt = pred.cpu(), gt.cpu()
         is_correct = torch.eq(pred, gt).numpy()
         accuracy.add(np.sum(is_correct), is_correct.size)
         if (i + 1) % log_interval == 0:
@@ -116,6 +119,7 @@ def test(model, problems, num_problems, log_interval=100):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--download', action='store_true')
+    parser.add_argument('--device', default='cuda')
     parser.add_argument('--arch', default='vinyals')
     parser.add_argument('--num_train_steps', type=int, default=int(1e4))
     parser.add_argument('--batch_size', type=int, default=16)

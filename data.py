@@ -170,8 +170,11 @@ class FewShotSampler(object):
             test_ims.append(torch.stack(char_ims[self._n_train:]))
         train_ims = torch.stack(train_ims)
         test_ims = torch.stack(test_ims)
-
         labels = torch.tensor(chars)[:, None]
+        # Add batch dimension.
+        train_ims = torch.unsqueeze(train_ims, 0)
+        test_ims = torch.unsqueeze(test_ims, 0)
+        labels = torch.unsqueeze(labels, 0)
         return train_ims, test_ims, labels
 
 

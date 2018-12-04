@@ -69,8 +69,8 @@ def flatten_few_shot_examples(inputs):
     b = inputs.shape[0]
     k = inputs.shape[1]
     n = inputs.shape[2]
-    labels = torch.arange(k).unsqueeze(-1).unsqueeze(-1)
-    labels = labels.expand(b, k, n, 1)
+    labels = torch.arange(k)  # .to(inputs.device)
+    labels = labels.unsqueeze(-1).unsqueeze(-1).expand(b, k, n, 1)
     # Flatten all.
     inputs_flat, _ = merge_dims(inputs, 1, 3)
     labels_flat, _ = merge_dims(labels, 1, 3)

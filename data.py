@@ -65,7 +65,7 @@ class OmniglotDataset(object):
 
 class PairSampler(torch.utils.data.Sampler):
 
-    def __init__(self, dataset, rand, batch_size, prob_pos=0.5, mode='uniform', transform=None):
+    def __init__(self, dataset, rand, batch_size, prob_pos=0.5, sample_mode='uniform', transform=None):
         '''
         Args:
             transform: None, or must convert PIL image to torch Tensor.
@@ -74,7 +74,7 @@ class PairSampler(torch.utils.data.Sampler):
         self._rand = rand
         self._batch_size = batch_size
         self._prob_pos = prob_pos
-        self._mode = mode
+        self._sample_mode = sample_mode
         self._transform = transform or transforms.ToTensor()
 
     def __iter__(self):
@@ -84,15 +84,15 @@ class PairSampler(torch.utils.data.Sampler):
         return 10 ** 9
 
     def __next__(self):
-        if self._mode == 'within_alphabet':
+        if self._sample_mode == 'within_alphabet':
             if self._dataset.alphabets is None:
                 raise RuntimeError('dataset does not support alphabets')
             alphabet = self._rand.choice(self._dataset.alphabets)
             char_candidates = self._dataset.alphabet_chars[alphabet]
-        elif self._mode == 'uniform':
+        elif self._sample_mode == 'uniform':
             char_candidates = len(self._dataset.characters)
         else:
-            raise ValueError('unknown mode: {}'.format(self._mode))
+            raise ValueError('unknown sample mode: {}'.format(self._sample_mode))
 
         # TODO: Use BatchSampler like DataLoader does.
         batch_im0 = []
@@ -125,7 +125,7 @@ class PairSampler(torch.utils.data.Sampler):
 
 class FewShotSampler(object):
 
-    def __init__(self, dataset, rand, mode, k, n_train, n_test, transform=None):
+    def __init__(self, dataset, rand, sample_mode, batch_size, k, n_train, n_test, transform=None):
         '''
         Builds necessary indices for efficient sampling.
 
@@ -134,7 +134,8 @@ class FewShotSampler(object):
         '''
         self._dataset = dataset
         self._rand = rand
-        self._mode = mode
+        self._sample_mode = sample_mode
+        self._batch_size = batch_size
         self._k = k
         self._n_train = n_train
         self._n_test = n_test
@@ -151,11 +152,13 @@ class FewShotSampler(object):
             labels: [k, 1]
 
         TODO: Should we flatten and shuffle test_ims to eliminate risk of model using location?
+
+        TODO: Support using characters all drawn by same author?
         '''
-        if self._mode == 'uniform':
+        if self._sample_mode == 'uniform':
             # Choose random subset of k character classes.
             chars = self._rand.choice(len(self._dataset.characters), self._k, replace=False)
-        elif self._mode == 'within_alphabet':
+        elif self._sample_mode == 'within_alphabet':
             if self._dataset.alphabets is None:
                 raise RuntimeError('dataset does not support alphabets')
             # Choose an alphabet.
@@ -164,31 +167,41 @@ class FewShotSampler(object):
             subset = self._dataset.alphabet_chars[alphabet]
             chars = self._rand.choice(subset, self._k, replace=False)
         else:
-            raise ValueError('unknown mode: "{}"'.format(self._mode))
+            raise ValueError('unknown sample mode: "{}"'.format(self._sample_mode))
 
-        # TODO: Support using characters all drawn by same author?
         # Sample a random n instances for each character.
         n = self._n_train + self._n_test
-        train_ims = []
-        test_ims = []
-        for char in chars:
-            char_ims = []
-            instances = self._rand.choice(self._dataset.char_instances[char], n, replace=False)
-            for index in instances:
-                im = self._dataset.images[index]
-                im = self._transform(im)
-                char_ims.append(im)
-            # Take first `n_train` for training, rest for testing.
-            train_ims.append(torch.stack(char_ims[:self._n_train]))
-            test_ims.append(torch.stack(char_ims[self._n_train:]))
-        train_ims = torch.stack(train_ims)
-        test_ims = torch.stack(test_ims)
-        labels = torch.tensor(chars)[:, None]
-        # Add batch dimension.
-        train_ims = torch.unsqueeze(train_ims, 0)
-        test_ims = torch.unsqueeze(test_ims, 0)
-        labels = torch.unsqueeze(labels, 0)
-        return train_ims, test_ims, labels
+
+        # TODO: Neat and simple way to avoid this mess?
+        batch_train_ims = []
+        batch_test_ims = []
+        batch_labels = []
+
+        for i in range(self._batch_size):
+            train_ims = []
+            test_ims = []
+            for char in chars:
+                char_ims = []
+                instances = self._rand.choice(self._dataset.char_instances[char], n, replace=False)
+                for index in instances:
+                    im = self._dataset.images[index]
+                    im = self._transform(im)
+                    char_ims.append(im)
+                # Take first `n_train` for training, rest for testing.
+                train_ims.append(torch.stack(char_ims[:self._n_train]))
+                test_ims.append(torch.stack(char_ims[self._n_train:]))
+            train_ims = torch.stack(train_ims)
+            test_ims = torch.stack(test_ims)
+            labels = torch.tensor(chars)[:, None]
+            # Add to batch.
+            batch_train_ims.append(train_ims)
+            batch_test_ims.append(test_ims)
+            batch_labels.append(labels)
+
+        batch_train_ims = torch.stack(batch_train_ims)
+        batch_test_ims = torch.stack(batch_test_ims)
+        batch_labels = torch.stack(batch_labels)
+        return batch_train_ims, batch_test_ims, batch_labels
 
 
 def load_both_and_merge(data_dir, **kwargs):

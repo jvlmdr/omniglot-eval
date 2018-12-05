@@ -16,6 +16,8 @@ import util
 
 def main():
     args = parse_args()
+    args.num_classes_train = args.num_classes_train or args.num_classes
+    args.num_shots_train = args.num_shots_train or args.num_shots
     device = torch.device(args.device)
 
     if args.arch == 'koch':
@@ -30,10 +32,9 @@ def main():
         raise ValueError('unknown arch: "{}"'.format(arch))
 
     similar_fn = getattr(nets, args.join)(use_bnorm=args.join_bnorm, n=embed_dim)
-    siamese = nets.Siamese(embed_fn, similar_fn)
-    siamese.to(device)
-    predictor = nets.MostSimilar(siamese)
-    parameters = list(siamese.parameters())
+    model = nets.Siamese(embed_fn, similar_fn)
+    model.to(device)
+    parameters = list(model.parameters())
     print('model parameters:')
     pprint.pprint([x.shape for x in parameters])
     optimizer = torch.optim.SGD(parameters, lr=1e-2, momentum=0.9)
@@ -44,24 +45,39 @@ def main():
         transforms.Normalize((0.5,), (1.0,)),
     ])
 
-    examples = data.PairSampler(
-        dataset_train,
-        np.random.RandomState(seed=args.train_seed),
-        batch_size=args.batch_size,
-        mode=args.train_sample_mode,
-        transform=image_transform)
-    train(siamese, examples, optimizer, args.num_train_steps, device=device)
+    if args.train_mode == 'pair':
+        examples = data.PairSampler(
+            dataset_train,
+            np.random.RandomState(seed=args.train_seed),
+            batch_size=args.batch_size,
+            sample_mode=args.train_sample_mode,
+            transform=image_transform)
+    elif args.train_mode == 'softmax':
+        examples = data.FewShotSampler(
+            dataset_train,
+            np.random.RandomState(seed=args.train_seed),
+            args.train_sample_mode,
+            batch_size=args.batch_size,
+            k=args.num_classes_train,
+            n_train=args.num_shots,
+            n_test=1,
+            transform=image_transform)
+    else:
+        raise ValueError('unknown train mode: "{}"'.format(args.train_mode))
 
-    for mode in args.test_sample_modes:
+    train(device, model, args.train_mode, examples, optimizer, args.num_steps)
+
+    for sample_mode in args.test_sample_modes:
         problems = data.FewShotSampler(
             dataset_test,
             np.random.RandomState(seed=args.test_seed),
-            mode=mode,
+            batch_size=1,
+            sample_mode=sample_mode,
             k=args.num_classes,
             n_train=args.num_shots,
             n_test=1,
             transform=image_transform)
-        test(predictor, problems, num_problems=args.num_test_problems, device=device)
+        test(device, model, problems, num_problems=args.num_test_problems)
 
 
 def load_datasets(args, transform=None):
@@ -96,34 +112,53 @@ def load_datasets(args, transform=None):
     return dataset_train, dataset_test
 
 
-def train(model, examples, optimizer, num_steps, device=None):
+def train(device, model, train_mode, examples, optimizer, num_steps):
     model.train()
 
-    for i, (im0, im1, target) in zip(range(num_steps), examples):
-        if device:
-            im0, im1, target = im0.to(device), im1.to(device), target.to(device)
+    for i, example in zip(range(num_steps), examples):
         optimizer.zero_grad()
-        output = model(im0, im1)
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(output, target)
+        if train_mode == 'pair':
+            im0, im1, target = example
+            im0, im1, target = im0.to(device), im1.to(device), target.to(device)
+            output = model(im0, im1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(output, target)
+        elif train_mode == 'softmax':
+            train_ims, test_ims, _ = example
+            # train_ims: [b, k, n, ...]
+            # test_ims: [b, k, n', ...]
+            test_ims, gt = util.flatten_few_shot_examples(test_ims)
+            train_ims, test_ims, gt = train_ims.to(device), test_ims.to(device), gt.to(device)
+            # test_ims: [b, m, ...]
+            # gt: [b, m]
+            scores = util.max_per_class(model, train_ims, test_ims)
+            # scores: [b, m, k]
+            loss = util.cross_entropy(scores, gt, dim=-1)
+            # Besides the loss, we can obtain the accuracy.
+            _, pred = torch.max(scores, -1, keepdim=False)
+            is_correct = torch.eq(pred, gt).cpu().numpy()
+            acc = np.sum(is_correct) / is_correct.size
+        else:
+            raise ValueError('unknown train mode: "{}"'.format(train_mode))
         loss.backward()
         optimizer.step()
         print('step {:d}, loss {:.3g}'.format(i, loss.item()))
 
 
-def test(model, problems, num_problems, device=None, log_interval=100):
+def test(device, model, problems, num_problems, log_interval=100):
     model.eval()
     accuracy = util.MeanAccumulator()
 
     for i, (train_ims, test_ims, _) in zip(range(num_problems), problems):
-        if device:
-            train_ims, test_ims = train_ims.to(device), test_ims.to(device)
-        b = train_ims.shape[0]
-        n = train_ims.shape[2]
-        # Flatten test examples.
+        # train_ims: [b, k, n, ...]
+        # test_ims: [b, k, n', ...]
         test_ims, gt = util.flatten_few_shot_examples(test_ims)
-        pred = model(train_ims, test_ims)
-        pred, gt = pred.cpu(), gt.cpu()
-        is_correct = torch.eq(pred, gt).numpy()
+        train_ims, test_ims, gt = train_ims.to(device), test_ims.to(device), gt.to(device)
+        # test_ims: [b, m, ...]
+        # gt: [b, m]
+        scores = util.max_per_class(model, train_ims, test_ims)
+        # scores: [b, m, k]
+        _, pred = torch.max(scores, -1, keepdim=False)
+        is_correct = torch.eq(pred, gt).cpu().numpy()
         accuracy.add(np.sum(is_correct), is_correct.size)
         if (i + 1) % log_interval == 0:
             print('steps {}, error rate {:.3g}'.format(i + 1, 1 - accuracy.mean()))
@@ -138,11 +173,16 @@ def parse_args():
     parser.add_argument('--arch', default='vinyals')
     parser.add_argument('--join', default='WeightedL1')
     parser.add_argument('--join_bnorm', type=util.strtobool, default=True)
-    parser.add_argument('--num_train_steps', type=int, default=int(1e4))
+    parser.add_argument('--num_steps', type=int, default=int(1e4))
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_test_problems', type=int, default=int(1e3))
     parser.add_argument('-k', '--num_classes', type=int, default=20)
     parser.add_argument('-n', '--num_shots', type=int, default=1)
+    parser.add_argument('--train_mode', default='pair', choices=['pair', 'softmax'])
+    parser.add_argument('--num_classes_train', type=int, default=0,
+                        help='only when train_mode is softmax')
+    parser.add_argument('--num_shots_train', type=int, default=0,
+                        help='only when train_mode is softmax')
     parser.add_argument('--data_dir', default='data')
     parser.add_argument('-s', '--split', default='lake')
     parser.add_argument('--train_sample_mode', default='uniform')

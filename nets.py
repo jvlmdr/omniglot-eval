@@ -8,41 +8,6 @@ import torch.nn as nn
 import util
 
 
-class MostSimilar(nn.Module):
-    '''Takes maximum similarity in each class.'''
-
-    def __init__(self, similar_fn):
-        '''
-        Args:
-            similar_fn:
-                Maps tensors of size [batch_dims, feature_dims] to [batch_dims, 1]
-        '''
-        super(MostSimilar, self).__init__()
-        self.similar_fn = similar_fn
-
-    def forward(self, train_inputs, test_inputs):
-        '''
-        Args:
-            train_inputs: [b, k, n, feature_dims]
-            test_inputs: [b, m, feature_dims]
-        
-        The feature_dims part must be broadcastable.
-
-        Returns:
-            predictions: [b, m, 1]; integers in [0, k)
-        '''
-        train_inputs = torch.unsqueeze(train_inputs, 1)
-        test_inputs = torch.unsqueeze(test_inputs, 2)
-        test_inputs = torch.unsqueeze(test_inputs, 2)
-        # train_inputs: [b, 1, k, n, ...]
-        # test_inputs:  [b, m, 1, 1, ...]
-        match_scores = self.similar_fn(train_inputs, test_inputs)
-        # match_scores: [b, m, k, n, 1]
-        class_scores, _ = torch.max(match_scores, dim=3, keepdim=False)
-        _, labels = torch.max(class_scores, dim=2, keepdim=False)
-        return labels
-
-
 class Dot(nn.Module):
 
     def __init__(self, use_bnorm=False, n=None):

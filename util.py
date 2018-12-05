@@ -64,13 +64,13 @@ def flatten_few_shot_examples(inputs):
 
     Returns:
         inputs_flat: [b, k * n, ...]
-        labels_flat: [b, k * n, 1]; integer in [0, k).
+        labels_flat: [b, k * n]; integer in [0, k).
     '''
     b = inputs.shape[0]
     k = inputs.shape[1]
     n = inputs.shape[2]
     labels = torch.arange(k)  # .to(inputs.device)
-    labels = labels.unsqueeze(-1).unsqueeze(-1).expand(b, k, n, 1)
+    labels = labels.unsqueeze(-1).expand(b, k, n)
     # Flatten all.
     inputs_flat, _ = merge_dims(inputs, 1, 3)
     labels_flat, _ = merge_dims(labels, 1, 3)
@@ -104,3 +104,56 @@ def strtobool(s):
         return False
     else:
         raise ValueError('cannot cast to bool: "{}"'.format(s))
+
+
+def compare_all(similar_fn, train_inputs, test_inputs):
+    '''
+    Args:
+        similar_fn: Maps tensors of size [batch_dims, feature_dims] to [batch_dims, 1]
+        train_inputs: [b, k, n, feature_dims]
+        test_inputs: [b, m, feature_dims]
+
+    Returns:
+        scores: [b, m, k, n]
+    '''
+    train_inputs = torch.unsqueeze(train_inputs, 1)
+    test_inputs = torch.unsqueeze(test_inputs, 2)
+    test_inputs = torch.unsqueeze(test_inputs, 2)
+    # train_inputs: [b, 1, k, n, ...]
+    # test_inputs:  [b, m, 1, 1, ...]
+    scores = similar_fn(train_inputs, test_inputs)
+    # scores: [b, m, k, n, 1]
+    scores = torch.squeeze(scores, 4)
+    return scores
+
+
+def max_per_class(similar_fn, train_inputs, test_inputs):
+    '''
+    Args:
+        See compare_all().
+
+    Returns:
+        class_scores: [b, m, k]
+    '''
+    example_scores = compare_all(similar_fn, train_inputs, test_inputs)
+    # example_scores: [b, m, k, n]
+    class_scores, _ = torch.max(example_scores, dim=-1, keepdim=False)
+    return class_scores
+
+
+def cross_entropy(input, target, dim=-1, reduction='elementwise_mean', **kwargs):
+    '''
+    Args:
+        input: [before_dims, n, after_dims]
+        target: [before_dims, after_dims]
+    '''
+    if reduction == 'none':
+        raise NotImplementedError('non-reduction is not supported')
+    n = len(input.shape)
+    if dim < 0:
+        dim += n
+    if dim != 1:
+        dims = [i for i in range(n) if i != dim]
+        dims.insert(1, dim)
+        input = input.permute(dims)
+    return torch.nn.functional.cross_entropy(input, target, **kwargs)

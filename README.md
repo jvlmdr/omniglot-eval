@@ -17,8 +17,8 @@ The difference lies in how a random set of K classes is obtained:
 - unstructured: Concatenate the characters of all alphabets, then choose K characters (without replacement).
 The hierarchy of alphabets and characters is ignored.
 
-Intuitively, we might expect that the few-shot learning problems in unstructured evaluation are easier to solve, because there is likely to be more variation _between alphabets_ than _within alphabets_.
-(This may seem counter-intuitive since characters within alphabets are not constrained to be different, whereas characters across alphabets may be identical. However, a character in one alphabet will have at most one such near-identical match in another alphabet.)
+Intuitively, we might expect that the few-shot learning problems in unstructured evaluation are easier to solve, because there is likely to be more variation _between_ than _within_.
+(This may seem counter-intuitive since characters within an alphabet must be different from one another, whereas characters across alphabets may be identical. However, a character in one alphabet can have at most one such near-identical match in another alphabet.)
 
 The original Omniglot github repo uses within-alphabet evaluation.
 It [defines 20 runs](https://github.com/brendenlake/omniglot/blob/9afc313/python/one-shot-classification/all_runs.zip), each of which comprises 20 training images and 20 testing images from the _same_ alphabet (2 runs for each of the 10 `evaluation` alphabets; see `run_alphabets.txt` for the correspondence).

@@ -21,7 +21,7 @@ Intuitively, we might expect that the unstructured problem is easier, because th
 (This may seem counter-intuitive since characters within an alphabet must be different from one another, whereas characters across alphabets may be identical. However, a character in one alphabet can have at most one such near-identical match in another alphabet.)
 
 The original Omniglot github repo uses within-alphabet evaluation.
-It [defines 20 runs](https://github.com/brendenlake/omniglot/blob/9afc313/python/one-shot-classification/all_runs.zip), each of which comprises 20 training images and 20 testing images from the _same_ alphabet (2 runs for each of the 10 `evaluation` alphabets; see `run_alphabets.txt` for the correspondence).
+It [defines 20 runs](https://github.com/brendenlake/omniglot/blob/9afc313/python/one-shot-classification/all_runs.zip), each of which comprises 20 training images and 20 testing images from the _same_ alphabet (2 runs for each of the 10 `evaluation` alphabets; see `lake-evaluation/run_alphabets.txt` for the correspondence).
 We used within-alphabet evaluation in our [NIPS 2016 paper](https://arxiv.org/abs/1606.05233), although we used many random trials instead of 20 runs.
 
 In contrast, several recent papers have used unstructured evaluation.

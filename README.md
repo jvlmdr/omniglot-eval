@@ -42,7 +42,14 @@ The results support the hypothesis that within-alphabet problems are much harder
 
 Hence, while recent papers may seem to be approaching saturation of the Omniglot task, we should remember that there is still room for improvement in the within-alphabet task.
 
-These results can be replicated by running `python train.py --data_dir=data/ --download`.
+Details for this experiment are as follows (the results can be replicated by running `python train.py --data_dir=data/ --download`).
+The embedding network uses more or less the same architecture as the Matching Nets paper (Vinyals et al. 2016).
+We input 24px images to a 4-layer conv-net, where each hidden layer has 64 channels.
+There are relu, batch-norm and max-pooling (stride 2) operations between each linear layer (but not at the output).
+The 64-D embedding vectors are compared using a cosine distance.
+During training, each batch contains 16 few-shot problems, each of which contains K = 5 classes with 1 training image and 1 testing image.
+We then use the cross-entropy-of-softmax loss with one-hot labels.
+To make predictions, we use a 1-NN (nearest neighbour) classifier.
 
 
 ## Dataset splits

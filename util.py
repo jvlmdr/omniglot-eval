@@ -63,23 +63,19 @@ def flatten_few_shot_examples(inputs, shuffle=False):
         inputs: [b, k, n, ...]
 
     Returns:
-        inputs_flat: [b, k * n, ...]
-        labels_flat: [b, k * n]; integer in [0, k).
+        inputs_flat: [b, k * n, ...]; same memory as `inputs`
+        labels_flat: [b, k * n]; integer in [0, k); on CPU
     '''
     b = inputs.shape[0]
     k = inputs.shape[1]
     n = inputs.shape[2]
-    labels = torch.arange(k)  # .to(inputs.device)
+    labels = torch.arange(k)
     labels = labels.unsqueeze(-1).expand(b, k, n)
     # Flatten all.
     inputs, _ = merge_dims(inputs, 1, 3)
     labels, _ = merge_dims(labels, 1, 3)
     if shuffle:
         m = k * n
-        # for i in range(b):
-        #     order = torch.randperm(m)
-        #     inputs[i, :] = inputs[i, order]
-        #     labels[i, :] = labels[i, order]
         order = torch.stack([torch.randperm(m) for _ in range(b)])
         labels = torch.gather(labels, 1, order)
         inputs = torch.gather(inputs, 1, unsqueeze_n(order, 3, dim=-1).expand_as(inputs))

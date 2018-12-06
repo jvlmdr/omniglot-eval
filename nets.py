@@ -54,6 +54,27 @@ class Cosine(nn.Module):
         return unflatten(output)
 
 
+class L2(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(L2, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = -torch.sqrt(torch.mean(torch.abs(x - y) ** 2, dim=-1, keepdim=True))
+        output = self.adjust(output)
+        return unflatten(output)
+
+
 class L1(nn.Module):
 
     def __init__(self, use_bnorm=False, n=None):

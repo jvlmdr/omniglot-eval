@@ -57,7 +57,7 @@ def unflatten_batch(y, batch_shape):
     return x
 
 
-def flatten_few_shot_examples(inputs):
+def flatten_few_shot_examples(inputs, shuffle=False):
     '''
     Args:
         inputs: [b, k, n, ...]
@@ -72,9 +72,18 @@ def flatten_few_shot_examples(inputs):
     labels = torch.arange(k)  # .to(inputs.device)
     labels = labels.unsqueeze(-1).expand(b, k, n)
     # Flatten all.
-    inputs_flat, _ = merge_dims(inputs, 1, 3)
-    labels_flat, _ = merge_dims(labels, 1, 3)
-    return inputs_flat, labels_flat
+    inputs, _ = merge_dims(inputs, 1, 3)
+    labels, _ = merge_dims(labels, 1, 3)
+    if shuffle:
+        m = k * n
+        # for i in range(b):
+        #     order = torch.randperm(m)
+        #     inputs[i, :] = inputs[i, order]
+        #     labels[i, :] = labels[i, order]
+        order = torch.stack([torch.randperm(m) for _ in range(b)])
+        labels = torch.gather(labels, 1, order)
+        inputs = torch.gather(inputs, 1, unsqueeze_n(order, 3, dim=-1).expand_as(inputs))
+    return inputs, labels
 
 
 class MeanAccumulator(object):
@@ -116,9 +125,8 @@ def compare_all(similar_fn, train_inputs, test_inputs):
     Returns:
         scores: [b, m, k, n]
     '''
-    train_inputs = torch.unsqueeze(train_inputs, 1)
-    test_inputs = torch.unsqueeze(test_inputs, 2)
-    test_inputs = torch.unsqueeze(test_inputs, 2)
+    train_inputs = train_inputs.unsqueeze(1)
+    test_inputs = test_inputs.unsqueeze(2).unsqueeze(2)
     # train_inputs: [b, 1, k, n, ...]
     # test_inputs:  [b, m, 1, 1, ...]
     scores = similar_fn(train_inputs, test_inputs)
@@ -157,3 +165,9 @@ def cross_entropy(input, target, dim=-1, reduction='elementwise_mean', **kwargs)
         dims.insert(1, dim)
         input = input.permute(dims)
     return torch.nn.functional.cross_entropy(input, target, **kwargs)
+
+
+def unsqueeze_n(x, n, dim):
+    for i in range(n):
+        x = torch.unsqueeze(x, dim)
+    return x

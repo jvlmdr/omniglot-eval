@@ -53,13 +53,13 @@ def main():
             dataset_train,
             np.random.RandomState(seed=args.train_seed),
             batch_size=args.batch_size,
-            sample_mode=args.train_sample_mode,
+            sample_mode=args.sample_mode_train,
             transform=image_transform)
     elif args.train_mode == 'softmax':
         examples = data.FewShotSampler(
             dataset_train,
             np.random.RandomState(seed=args.train_seed),
-            args.train_sample_mode,
+            args.sample_mode_train,
             batch_size=args.batch_size,
             k=args.num_classes_train,
             n_train=args.num_shots_train,
@@ -67,7 +67,8 @@ def main():
             transform=image_transform)
     else:
         raise ValueError('unknown train mode: "{}"'.format(args.train_mode))
-    train(device, model, args.train_mode, examples, optimizer, args.num_steps)
+    train(device, model, args.train_mode, examples, optimizer, args.num_steps,
+          max_num_queries=args.max_num_queries_train)
 
     def make_config_name(mode, k, n):
         return '{:d}_way_{:d}_shot_{:s}'.format(k, n, mode)
@@ -135,7 +136,7 @@ def load_datasets(args, transform=None):
     return dataset_train, dataset_test
 
 
-def train(device, model, train_mode, examples, optimizer, num_steps):
+def train(device, model, train_mode, examples, optimizer, num_steps, max_num_queries=None):
     model.train()
 
     for i, example in zip(range(num_steps), examples):
@@ -149,7 +150,10 @@ def train(device, model, train_mode, examples, optimizer, num_steps):
             train_ims, test_ims, _ = example
             # train_ims: [b, k, n, ...]
             # test_ims: [b, k, n', ...]
-            test_ims, gt = util.flatten_few_shot_examples(test_ims)
+            test_ims, gt = util.flatten_few_shot_examples(test_ims, shuffle=True)
+            if max_num_queries:
+                test_ims = test_ims[:, :max_num_queries]
+                gt = gt[:, :max_num_queries]
             train_ims, test_ims, gt = train_ims.to(device), test_ims.to(device), gt.to(device)
             # test_ims: [b, m, ...]
             # gt: [b, m]
@@ -208,9 +212,11 @@ def parse_args():
                         help='only when train_mode is softmax')
     parser.add_argument('--num_shots_train', type=int, default=1,
                         help='only when train_mode is softmax')
+    parser.add_argument('--max_num_queries_train', type=int, default=None,
+                        help='only when train_mode is softmax')
     parser.add_argument('--data_dir', default='data')
     parser.add_argument('-s', '--split', default='lake')
-    parser.add_argument('--train_sample_mode', default='uniform')
+    parser.add_argument('--sample_mode_train', default='uniform')
     parser.add_argument('--sample_modes', nargs='+',
                         default=['uniform', 'within_alphabet'])
     parser.add_argument('--train_seed', type=int, default=0)

@@ -1,0 +1,5 @@
+problem,uniform,within_alphabet
+20-way 1-shot,10.7%,24.2%
+20-way 5-shot,3.6%,12.8%
+5-way 1-shot,3.5%,9.5%
+5-way 5-shot,1.1%,4.2%

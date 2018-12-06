@@ -3,11 +3,16 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
+import collections
+import csv
 import numpy as np
 import pprint
 import torch
 from torchvision import transforms
 from torchvision.datasets import omniglot
+
+import logging
+logger = logging.getLogger(__name__)
 
 import nets
 import data
@@ -16,8 +21,7 @@ import util
 
 def main():
     args = parse_args()
-    args.num_classes_train = args.num_classes_train or args.num_classes
-    args.num_shots_train = args.num_shots_train or args.num_shots
+    logging.basicConfig(level=logging.INFO)
     device = torch.device(args.device)
 
     if args.arch == 'koch':
@@ -35,8 +39,7 @@ def main():
     model = nets.Siamese(embed_fn, similar_fn)
     model.to(device)
     parameters = list(model.parameters())
-    print('model parameters:')
-    pprint.pprint([x.shape for x in parameters])
+    logger.info('model parameters: %s', [x.shape for x in parameters])
     optimizer = torch.optim.SGD(parameters, lr=1e-2, momentum=0.9)
 
     dataset_train, dataset_test = load_datasets(args, transform=image_pre_transform)
@@ -59,25 +62,45 @@ def main():
             args.train_sample_mode,
             batch_size=args.batch_size,
             k=args.num_classes_train,
-            n_train=args.num_shots,
+            n_train=args.num_shots_train,
             n_test=1,
             transform=image_transform)
     else:
         raise ValueError('unknown train mode: "{}"'.format(args.train_mode))
-
     train(device, model, args.train_mode, examples, optimizer, args.num_steps)
 
-    for sample_mode in args.test_sample_modes:
+    def make_config_name(mode, k, n):
+        return '{:d}_way_{:d}_shot_{:s}'.format(k, n, mode)
+
+    def configs():
+        return ((sample_mode, k, n) for k in args.num_classes
+                                    for n in args.num_shots
+                                    for sample_mode in args.sample_modes)
+
+    results = collections.OrderedDict()
+    for sample_mode, k, n in configs():
+        name = make_config_name(sample_mode, k, n)
         problems = data.FewShotSampler(
             dataset_test,
             np.random.RandomState(seed=args.test_seed),
             batch_size=1,
             sample_mode=sample_mode,
-            k=args.num_classes,
-            n_train=args.num_shots,
+            k=k,
+            n_train=n,
             n_test=1,
             transform=image_transform)
-        test(device, model, problems, num_problems=args.num_test_problems)
+        results[name] = evaluate(device, model, problems, num_problems=args.num_test_problems)
+
+    with open('results.txt', 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(['problem'] + args.sample_modes)
+        for k in args.num_classes:
+            for n in args.num_shots:
+                row_header = '{:d}-way {:d}-shot'.format(k, n)
+                error_rates = [results[make_config_name(mode, k, n)]['error']
+                               for mode in args.sample_modes]
+                percents = ['{:.1f}%'.format(100 * x) for x in error_rates]
+                writer.writerow([row_header] + percents)
 
 
 def load_datasets(args, transform=None):
@@ -141,10 +164,10 @@ def train(device, model, train_mode, examples, optimizer, num_steps):
             raise ValueError('unknown train mode: "{}"'.format(train_mode))
         loss.backward()
         optimizer.step()
-        print('step {:d}, loss {:.3g}'.format(i, loss.item()))
+        logger.info('step %d, loss %.4f', i, loss.item())
 
 
-def test(device, model, problems, num_problems, log_interval=100):
+def evaluate(device, model, problems, num_problems, log_interval=100):
     model.eval()
     accuracy = util.MeanAccumulator()
 
@@ -161,9 +184,11 @@ def test(device, model, problems, num_problems, log_interval=100):
         is_correct = torch.eq(pred, gt).cpu().numpy()
         accuracy.add(np.sum(is_correct), is_correct.size)
         if (i + 1) % log_interval == 0:
-            print('steps {}, error rate {:.3g}'.format(i + 1, 1 - accuracy.mean()))
+            logger.info('steps %d, error rate %.3g', i + 1, 1 - accuracy.mean())
 
-    print('error rate: {:.3g}'.format(1 - accuracy.mean()))
+    return collections.OrderedDict([
+        ('error', 1 - accuracy.mean()),
+    ])
 
 
 def parse_args():
@@ -171,22 +196,22 @@ def parse_args():
     parser.add_argument('--download', action='store_true')
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--arch', default='vinyals')
-    parser.add_argument('--join', default='WeightedL1')
-    parser.add_argument('--join_bnorm', type=util.strtobool, default=True)
+    parser.add_argument('--join', default='Cosine')
+    parser.add_argument('--join_bnorm', type=util.strtobool, default=False)
     parser.add_argument('--num_steps', type=int, default=int(1e4))
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_test_problems', type=int, default=int(1e3))
-    parser.add_argument('-k', '--num_classes', type=int, default=20)
-    parser.add_argument('-n', '--num_shots', type=int, default=1)
-    parser.add_argument('--train_mode', default='pair', choices=['pair', 'softmax'])
-    parser.add_argument('--num_classes_train', type=int, default=0,
+    parser.add_argument('-k', '--num_classes', nargs='+', type=int, default=[20, 5])
+    parser.add_argument('-n', '--num_shots', nargs='+', type=int, default=[1, 5])
+    parser.add_argument('--train_mode', default='softmax', choices=['pair', 'softmax'])
+    parser.add_argument('--num_classes_train', type=int, default=5,
                         help='only when train_mode is softmax')
-    parser.add_argument('--num_shots_train', type=int, default=0,
+    parser.add_argument('--num_shots_train', type=int, default=1,
                         help='only when train_mode is softmax')
     parser.add_argument('--data_dir', default='data')
     parser.add_argument('-s', '--split', default='lake')
     parser.add_argument('--train_sample_mode', default='uniform')
-    parser.add_argument('--test_sample_modes', nargs='+',
+    parser.add_argument('--sample_modes', nargs='+',
                         default=['uniform', 'within_alphabet'])
     parser.add_argument('--train_seed', type=int, default=0)
     parser.add_argument('--test_mode', default='uniform')

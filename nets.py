@@ -8,112 +8,6 @@ import torch.nn as nn
 import util
 
 
-class Dot(nn.Module):
-
-    def __init__(self, use_bnorm=False, n=None):
-        super(Dot, self).__init__()
-        if use_bnorm:
-            self.adjust = nn.BatchNorm1d(1)
-        else:
-            self.adjust = nn.Linear(1, 1)
-            nn.init.constant_(self.adjust.weight, 1)
-            nn.init.constant_(self.adjust.bias, 0)
-
-    def forward(self, x, y):
-        x, y = torch.distributions.utils.broadcast_all(x, y)
-        x, unflatten = util.flatten_batch(x, 1)
-        y, _ = util.flatten_batch(y, 1)
-
-        output = torch.mean(x * y, dim=-1, keepdim=True)
-        output = self.adjust(output)
-        return unflatten(output)
-
-
-class Cosine(nn.Module):
-
-    def __init__(self, use_bnorm=False, n=None):
-        super(Cosine, self).__init__()
-        if use_bnorm:
-            self.adjust = nn.BatchNorm1d(1)
-        else:
-            self.adjust = nn.Linear(1, 1)
-            nn.init.constant_(self.adjust.weight, 1)
-            nn.init.constant_(self.adjust.bias, 0)
-
-    def forward(self, x, y):
-        x, y = torch.distributions.utils.broadcast_all(x, y)
-        x, unflatten = util.flatten_batch(x, 1)
-        y, _ = util.flatten_batch(y, 1)
-
-        xy = torch.sum(x * y, dim=-1, keepdim=True)
-        xx = torch.sum(x ** 2, dim=-1, keepdim=True)
-        yy = torch.sum(y ** 2, dim=-1, keepdim=True)
-        eps = 1e-3
-        output = xy / (torch.sqrt(xx) * torch.sqrt(yy) + eps)
-        output = self.adjust(output)
-        return unflatten(output)
-
-
-class L2(nn.Module):
-
-    def __init__(self, use_bnorm=False, n=None):
-        super(L2, self).__init__()
-        if use_bnorm:
-            self.adjust = nn.BatchNorm1d(1)
-        else:
-            self.adjust = nn.Linear(1, 1)
-            nn.init.constant_(self.adjust.weight, 1)
-            nn.init.constant_(self.adjust.bias, 0)
-
-    def forward(self, x, y):
-        x, y = torch.distributions.utils.broadcast_all(x, y)
-        x, unflatten = util.flatten_batch(x, 1)
-        y, _ = util.flatten_batch(y, 1)
-
-        output = -torch.sqrt(torch.mean(torch.abs(x - y) ** 2, dim=-1, keepdim=True))
-        output = self.adjust(output)
-        return unflatten(output)
-
-
-class L1(nn.Module):
-
-    def __init__(self, use_bnorm=False, n=None):
-        super(L1, self).__init__()
-        if use_bnorm:
-            self.adjust = nn.BatchNorm1d(1)
-        else:
-            self.adjust = nn.Linear(1, 1)
-            nn.init.constant_(self.adjust.weight, 1)
-            nn.init.constant_(self.adjust.bias, 0)
-
-    def forward(self, x, y):
-        x, y = torch.distributions.utils.broadcast_all(x, y)
-        x, unflatten = util.flatten_batch(x, 1)
-        y, _ = util.flatten_batch(y, 1)
-
-        output = -torch.mean(torch.abs(x - y), dim=-1, keepdim=True)
-        output = self.adjust(output)
-        return unflatten(output)
-
-
-class WeightedL1(nn.Module):
-
-    def __init__(self, use_bnorm, n):
-        super(WeightedL1, self).__init__()
-        if use_bnorm:
-            self.net = nn.Sequential(nn.BatchNorm1d(n), nn.Linear(n, 1))
-        else:
-            self.net = nn.Sequential(nn.Linear(n, 1))
-
-    def forward(self, x, y):
-        x, y = torch.distributions.utils.broadcast_all(x, y)
-        x, unflatten = util.flatten_batch(x, 1)
-        y, _ = util.flatten_batch(y, 1)
-
-        output = self.net(torch.abs(x - y))
-        return unflatten(output)
-
-
 class Siamese(nn.Module):
 
     def __init__(self, embed_fn, similar_fn):
@@ -214,3 +108,181 @@ class KochEmbedding(nn.Module):
         x = x.view(x.size(0), 6 ** 2 * 256)
         x = self.output_net(x)
         return x
+
+
+class Dot(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(Dot, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = torch.mean(x * y, dim=-1, keepdim=True)
+        output = self.adjust(output)
+        return unflatten(output)
+
+
+class Cosine(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(Cosine, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        xy = torch.sum(x * y, dim=-1, keepdim=True)
+        xx = torch.sum(x ** 2, dim=-1, keepdim=True)
+        yy = torch.sum(y ** 2, dim=-1, keepdim=True)
+        eps = 1e-3
+        output = xy / (torch.sqrt(xx) * torch.sqrt(yy) + eps)
+        output = self.adjust(output)
+        return unflatten(output)
+
+
+class L2(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(L2, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = -torch.sqrt(torch.mean((x - y) ** 2, dim=-1, keepdim=True))
+        output = self.adjust(output)
+        return unflatten(output)
+
+
+class SquareL2(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(SquareL2, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = -torch.mean((x - y) ** 2, dim=-1, keepdim=True)
+        output = self.adjust(output)
+        return unflatten(output)
+
+
+class L1(nn.Module):
+
+    def __init__(self, use_bnorm=False, n=None):
+        super(L1, self).__init__()
+        if use_bnorm:
+            self.adjust = nn.BatchNorm1d(1)
+        else:
+            self.adjust = nn.Linear(1, 1)
+            nn.init.constant_(self.adjust.weight, 1)
+            nn.init.constant_(self.adjust.bias, 0)
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = -torch.mean(torch.abs(x - y), dim=-1, keepdim=True)
+        output = self.adjust(output)
+        return unflatten(output)
+
+
+class WeightedL1(nn.Module):
+
+    def __init__(self, use_bnorm, n):
+        super(WeightedL1, self).__init__()
+        if use_bnorm:
+            self.net = nn.Sequential(nn.BatchNorm1d(n), nn.Linear(n, 1))
+        else:
+            self.net = nn.Sequential(nn.Linear(n, 1))
+
+    def forward(self, x, y):
+        x, y = torch.distributions.utils.broadcast_all(x, y)
+        x, unflatten = util.flatten_batch(x, 1)
+        y, _ = util.flatten_batch(y, 1)
+
+        output = self.net(torch.abs(x - y))
+        return unflatten(output)
+
+
+def compare_all(similar_fn, train_inputs, test_inputs):
+    '''
+    Args:
+        similar_fn: Maps tensors of size [batch_dims, feature_dims] to [batch_dims, 1]
+        train_inputs: [b, k, n, feature_dims]
+        test_inputs: [b, m, feature_dims]
+
+    Returns:
+        scores: [b, m, k, n]
+    '''
+    train_inputs = train_inputs.unsqueeze(1)
+    test_inputs = test_inputs.unsqueeze(2).unsqueeze(2)
+    # train_inputs: [b, 1, k, n, ...]
+    # test_inputs:  [b, m, 1, 1, ...]
+    scores = similar_fn(train_inputs, test_inputs)
+    # scores: [b, m, k, n, 1]
+    scores = torch.squeeze(scores, 4)
+    return scores
+
+
+def nearest(similar_fn, train_inputs, test_inputs):
+    '''
+    Args:
+        See compare_all().
+
+    Returns:
+        class_scores: [b, m, k]
+    '''
+    example_scores = compare_all(similar_fn, train_inputs, test_inputs)
+    # example_scores: [b, m, k, n]
+    class_scores, _ = torch.max(example_scores, dim=-1, keepdim=False)
+    return class_scores
+
+
+def protonet(similar_fn, train_inputs, test_inputs):
+    '''
+    Args:
+        similar_fn: Maps tensors of size [batch_dims, feature_dims] to [batch_dims, 1]
+        train_inputs: [b, k, n, feature_dims]
+        test_inputs: [b, m, feature_dims]
+
+    Returns:
+        scores: [b, m, k]
+    '''
+    train_inputs = torch.mean(train_inputs, dim=2, keepdim=False)
+    scores = similar_fn(train_inputs.unsqueeze(1),  # [b, 1, k, ...]
+                        test_inputs.unsqueeze(2))  # [b, m, 1, ...]
+    # scores: [b, m, k, 1]
+    return scores.squeeze(-1)

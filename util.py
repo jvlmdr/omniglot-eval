@@ -111,40 +111,6 @@ def strtobool(s):
         raise ValueError('cannot cast to bool: "{}"'.format(s))
 
 
-def compare_all(similar_fn, train_inputs, test_inputs):
-    '''
-    Args:
-        similar_fn: Maps tensors of size [batch_dims, feature_dims] to [batch_dims, 1]
-        train_inputs: [b, k, n, feature_dims]
-        test_inputs: [b, m, feature_dims]
-
-    Returns:
-        scores: [b, m, k, n]
-    '''
-    train_inputs = train_inputs.unsqueeze(1)
-    test_inputs = test_inputs.unsqueeze(2).unsqueeze(2)
-    # train_inputs: [b, 1, k, n, ...]
-    # test_inputs:  [b, m, 1, 1, ...]
-    scores = similar_fn(train_inputs, test_inputs)
-    # scores: [b, m, k, n, 1]
-    scores = torch.squeeze(scores, 4)
-    return scores
-
-
-def max_per_class(similar_fn, train_inputs, test_inputs):
-    '''
-    Args:
-        See compare_all().
-
-    Returns:
-        class_scores: [b, m, k]
-    '''
-    example_scores = compare_all(similar_fn, train_inputs, test_inputs)
-    # example_scores: [b, m, k, n]
-    class_scores, _ = torch.max(example_scores, dim=-1, keepdim=False)
-    return class_scores
-
-
 def cross_entropy(input, target, dim=-1, reduction='elementwise_mean', **kwargs):
     '''
     Args:

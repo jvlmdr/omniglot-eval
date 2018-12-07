@@ -36,6 +36,8 @@ def main():
         raise ValueError('unknown arch: "{}"'.format(arch))
 
     similar_fn = getattr(nets, args.join)(use_bnorm=args.join_bnorm, n=embed_dim)
+    apply_fn = getattr(nets, args.apply_method)
+
     model = nets.Siamese(embed_fn, similar_fn)
     model.to(device)
     parameters = list(model.parameters())
@@ -67,7 +69,7 @@ def main():
             transform=image_transform)
     else:
         raise ValueError('unknown train mode: "{}"'.format(args.train_mode))
-    train(device, model, args.train_mode, examples, optimizer, args.num_steps,
+    train(device, model, apply_fn, args.train_mode, examples, optimizer, args.num_steps,
           max_num_queries=args.max_num_queries_train)
 
     def make_config_name(mode, k, n):
@@ -90,7 +92,8 @@ def main():
             n_train=n,
             n_test=1,
             transform=image_transform)
-        results[name] = evaluate(device, model, problems, num_problems=args.num_test_problems)
+        results[name] = evaluate(device, model, apply_fn, problems,
+                                 num_problems=args.num_test_problems)
 
     with open('results.txt', 'w') as f:
         writer = csv.writer(f)
@@ -136,7 +139,8 @@ def load_datasets(args, transform=None):
     return dataset_train, dataset_test
 
 
-def train(device, model, train_mode, examples, optimizer, num_steps, max_num_queries=None):
+def train(device, model, apply_fn, train_mode, examples, optimizer, num_steps,
+          max_num_queries=None):
     model.train()
 
     for i, example in zip(range(num_steps), examples):
@@ -157,7 +161,7 @@ def train(device, model, train_mode, examples, optimizer, num_steps, max_num_que
             train_ims, test_ims, gt = train_ims.to(device), test_ims.to(device), gt.to(device)
             # test_ims: [b, m, ...]
             # gt: [b, m]
-            scores = util.max_per_class(model, train_ims, test_ims)
+            scores = apply_fn(model, train_ims, test_ims)
             # scores: [b, m, k]
             loss = util.cross_entropy(scores, gt, dim=-1)
             # Besides the loss, we can obtain the accuracy.
@@ -171,7 +175,7 @@ def train(device, model, train_mode, examples, optimizer, num_steps, max_num_que
         logger.info('step %d, loss %.4f', i, loss.item())
 
 
-def evaluate(device, model, problems, num_problems, log_interval=100):
+def evaluate(device, model, apply_fn, problems, num_problems, log_interval=100):
     model.eval()
     accuracy = util.MeanAccumulator()
 
@@ -182,7 +186,7 @@ def evaluate(device, model, problems, num_problems, log_interval=100):
         train_ims, test_ims, gt = train_ims.to(device), test_ims.to(device), gt.to(device)
         # test_ims: [b, m, ...]
         # gt: [b, m]
-        scores = util.max_per_class(model, train_ims, test_ims)
+        scores = apply_fn(model, train_ims, test_ims)
         # scores: [b, m, k]
         _, pred = torch.max(scores, -1, keepdim=False)
         is_correct = torch.eq(pred, gt).cpu().numpy()
@@ -200,6 +204,8 @@ def parse_args():
     parser.add_argument('--download', action='store_true')
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--arch', default='vinyals')
+    parser.add_argument('--apply_method', default='nearest',
+                        choices=['nearest', 'protonet'])
     parser.add_argument('--join', default='Cosine')
     parser.add_argument('--join_bnorm', type=util.strtobool, default=False)
     parser.add_argument('--num_steps', type=int, default=int(1e4))

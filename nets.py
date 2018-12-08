@@ -10,22 +10,22 @@ import util
 
 class Siamese(nn.Module):
 
-    def __init__(self, embed_fn, similar_fn):
+    def __init__(self, embed_fn, join_fn, apply_fn):
         super(Siamese, self).__init__()
         self.embed_fn = embed_fn
-        self.similar_fn = similar_fn
+        self.join_fn = join_fn
+        self.apply_fn = apply_fn
 
     def forward(self, images_a, images_b):
         '''
         Args:
-            images_a: [..., c, h, w]
-            images_b: [..., c, h, w]
+            images_a: [b, k, n, c, h, w]
+            images_b: [b, q, c, h, w]
         '''
-        images_a, images_b = torch.distributions.utils.broadcast_all(images_a, images_b)
         # Flatten batch to evaluate conv-net.
         feat_a = util.map_images(self.embed_fn, images_a)
         feat_b = util.map_images(self.embed_fn, images_b)
-        return self.similar_fn(feat_a, feat_b)
+        return self.apply_fn(self.join_fn, feat_a, feat_b)
 
 
 # For fully-connected layers, following pattern in:
@@ -257,7 +257,7 @@ def compare_all(similar_fn, train_inputs, test_inputs):
     return scores
 
 
-def nearest(similar_fn, train_inputs, test_inputs):
+def nearest(join_fn, train_inputs, test_inputs):
     '''
     Args:
         See compare_all().
@@ -265,13 +265,13 @@ def nearest(similar_fn, train_inputs, test_inputs):
     Returns:
         class_scores: [b, m, k]
     '''
-    example_scores = compare_all(similar_fn, train_inputs, test_inputs)
+    example_scores = compare_all(join_fn, train_inputs, test_inputs)
     # example_scores: [b, m, k, n]
     class_scores, _ = torch.max(example_scores, dim=-1, keepdim=False)
     return class_scores
 
 
-def protonet(similar_fn, train_inputs, test_inputs):
+def protonet(join_fn, train_inputs, test_inputs):
     '''
     Args:
         similar_fn: Maps tensors of size [batch_dims, feature_dims] to [batch_dims, 1]
@@ -282,7 +282,87 @@ def protonet(similar_fn, train_inputs, test_inputs):
         scores: [b, m, k]
     '''
     train_inputs = torch.mean(train_inputs, dim=2, keepdim=False)
-    scores = similar_fn(train_inputs.unsqueeze(1),  # [b, 1, k, ...]
-                        test_inputs.unsqueeze(2))  # [b, m, 1, ...]
+    scores = join_fn(train_inputs.unsqueeze(1),  # [b, 1, k, ...]
+                     test_inputs.unsqueeze(2))  # [b, m, 1, ...]
     # scores: [b, m, k, 1]
     return scores.squeeze(-1)
+
+
+class Nearest(nn.Module):
+
+    def __init__(self):
+        super(Nearest, self).__init__()
+
+    def forward(self, join_fn, train_inputs, test_inputs):
+        return nearest(join_fn, train_inputs, test_inputs)
+
+
+class ProtoNet(nn.Module):
+
+    def __init__(self):
+        super(ProtoNet, self).__init__()
+
+    def forward(self, join_fn, train_inputs, test_inputs):
+        return protonet(join_fn, train_inputs, test_inputs)
+
+
+class KernelRidgeRegression(nn.Module):
+
+    def __init__(self, regularizer=1e-2):
+        super(KernelRidgeRegression, self).__init__()
+        self.regularizer = regularizer
+        # Re-scale the result from the one-hot task.
+        self.adjust = nn.Linear(1, 1)
+        nn.init.constant_(self.adjust.weight, 1)
+        nn.init.constant_(self.adjust.bias, 0)
+
+    def forward(self, join_fn, train_inputs, test_inputs):
+        '''
+        Args:
+            train_inputs: [b, k, n, *]
+            test_inputs: [b, q, *]
+
+        Returns:
+            scores: [b, q, k]
+        '''
+        predictions = kernel_ridge_regression_one_hot(
+            join_fn, train_inputs, test_inputs, regularizer=self.regularizer)
+        scores = self.adjust(predictions.unsqueeze(-1)).squeeze(-1)
+        return scores
+
+
+def kernel_ridge_regression_one_hot(join_fn, train_inputs, test_inputs, regularizer=1e-2):
+    '''
+    Args:
+        train_inputs: [b, k, n, *]
+        test_inputs: [b, q, *]
+
+    Returns:
+        predictions: [b, q, k]
+    '''
+    device = train_inputs.device
+    k, n = train_inputs.shape[1:3]
+    train_inputs, train_labels = util.flatten_few_shot_examples(train_inputs)
+    train_labels = train_labels.to(device)
+    # train_inputs: [b, kn, *]
+    # train_labels: [b, kn, 1]
+    train_targets = util.one_hot(k, train_labels, device=device).type(torch.float)
+    # train_targets: [b, kn, k]
+    kernel_matrix = join_fn(train_inputs.unsqueeze(2),  # [b, kn, 1, *]
+                            train_inputs.unsqueeze(1))  # [b, 1, kn, *]
+    kernel_matrix = kernel_matrix.squeeze(-1)
+    # kernel_matrix: [b, kn, kn]
+    kernel_matrix = kernel_matrix.squeeze(-1)
+    kernel_matrix += regularizer * torch.eye(k * n, device=device)
+    coeff, _ = torch.gesv(train_targets, kernel_matrix)
+    # coeff: [b, kn, k]
+    kernel_train_test = join_fn(train_inputs.unsqueeze(2),  # [b, kn, 1, *]
+                                test_inputs.unsqueeze(1))  # [b, 1, q, *]
+    kernel_train_test = kernel_train_test.squeeze(-1)
+    # kernel_train_test: [b, kn, q]
+    predictions = torch.bmm(kernel_train_test.transpose(-1, -2), coeff)
+    # predictions: [b, q, k]
+    return predictions
+
+
+KRR = KernelRidgeRegression

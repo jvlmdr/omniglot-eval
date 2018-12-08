@@ -133,3 +133,15 @@ def unsqueeze_n(x, n, dim):
     for i in range(n):
         x = torch.unsqueeze(x, dim)
     return x
+
+
+def one_hot(n, labels, device=None):
+    '''
+    Args:
+        n: Integer
+        labels: [dims]
+
+    Returns:
+        [dims, n]
+    '''
+    return torch.eq(torch.arange(n, device=device), labels.unsqueeze(-1))

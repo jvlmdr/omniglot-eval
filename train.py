@@ -65,12 +65,11 @@ def main():
             batch_size=args.batch_size,
             k=args.num_classes_train,
             n_train=args.num_shots_train,
-            n_test=1,
+            n_test=args.num_queries_train,
             transform=image_transform)
     else:
         raise ValueError('unknown train mode: "{}"'.format(args.train_mode))
-    train(device, model, args.train_mode, examples, optimizer, args.num_steps,
-          max_num_queries=args.max_num_queries_train)
+    train(device, model, args.train_mode, examples, optimizer, args.num_steps)
 
     def make_config_name(mode, k, n):
         return '{:d}_way_{:d}_shot_{:s}'.format(k, n, mode)
@@ -139,8 +138,7 @@ def load_datasets(args, transform=None):
     return dataset_train, dataset_test
 
 
-def train(device, model, train_mode, examples, optimizer, num_steps,
-          max_num_queries=None):
+def train(device, model, train_mode, examples, optimizer, num_steps):
     model.train()
 
     for i, example in zip(range(num_steps), examples):
@@ -155,9 +153,6 @@ def train(device, model, train_mode, examples, optimizer, num_steps,
             # train_ims: [b, k, n, ...]
             # test_ims: [b, k, n', ...]
             test_ims, gt = util.flatten_few_shot_examples(test_ims, shuffle=True)
-            if max_num_queries:
-                test_ims = test_ims[:, :max_num_queries]
-                gt = gt[:, :max_num_queries]
             train_ims, test_ims, gt = train_ims.to(device), test_ims.to(device), gt.to(device)
             # test_ims: [b, m, ...]
             # gt: [b, m]
@@ -218,7 +213,7 @@ def parse_args():
                         help='only when train_mode is softmax')
     parser.add_argument('--num_shots_train', type=int, default=1,
                         help='only when train_mode is softmax')
-    parser.add_argument('--max_num_queries_train', type=int, default=None,
+    parser.add_argument('--num_queries_train', type=int, default=1,
                         help='only when train_mode is softmax')
     parser.add_argument('--data_dir', default='data')
     parser.add_argument('-s', '--split', default='lake')

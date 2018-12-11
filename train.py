@@ -42,7 +42,6 @@ def main():
     model.to(device)
     parameters = list(model.parameters())
     logger.info('model parameters: %s', [x.shape for x in parameters])
-    optimizer = torch.optim.SGD(parameters, lr=1e-2, momentum=0.9)
 
     dataset_train, dataset_test = load_datasets(args, transform=image_pre_transform)
     image_transform = transforms.Compose([
@@ -69,7 +68,7 @@ def main():
             transform=image_transform)
     else:
         raise ValueError('unknown train mode: "{}"'.format(args.train_mode))
-    train(device, model, args.train_mode, examples, optimizer, args.num_steps)
+    train(device, model, args.train_mode, examples, args.num_steps)
 
     def make_config_name(mode, k, n):
         return '{:d}_way_{:d}_shot_{:s}'.format(k, n, mode)
@@ -138,10 +137,16 @@ def load_datasets(args, transform=None):
     return dataset_train, dataset_test
 
 
-def train(device, model, train_mode, examples, optimizer, num_steps):
+def train(device, model, train_mode, examples, num_steps):
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
+    milestones = list(map(int, num_steps * np.array([1 / 2, 3 / 4, 7 / 8])))
+    logger.info('lr milestones: {}'.format(milestones))
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones)
+
     model.train()
 
     for i, example in zip(range(num_steps), examples):
+        scheduler.step()
         optimizer.zero_grad()
         if train_mode == 'pair':
             im0, im1, target = example

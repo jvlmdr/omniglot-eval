@@ -63,6 +63,26 @@ class OmniglotDataset(object):
         self.char_instances = char_instances
 
 
+def add_rotations(dataset):
+    angles = [0, 90, 180, 270]
+    label_angle_pairs = list(itertools.chain.from_iterable(
+        ((label, angle) for label in range(len(dataset.characters))) for angle in angles))
+    new_label = _inv_map(enumerate(label_angle_pairs))
+
+    labels = list(itertools.chain.from_iterable(
+        (new_label[(label, angle)] for label in dataset.labels) for angle in angles))
+    images = list(itertools.chain.from_iterable(
+        (transforms.functional.rotate(im, angle) for im in dataset.images)
+        for angle in angles))
+    characters = [_rot_name(dataset.characters[label], angle)
+                  for label, angle in label_angle_pairs]
+    return OmniglotDataset(dataset.alphabets, characters, images, labels)
+
+
+def _rot_name(original, angle):
+    return original if angle == 0 else (original + '_rot' + str(angle))
+
+
 class PairSampler(torch.utils.data.Sampler):
 
     def __init__(self, dataset, rand, batch_size, prob_pos=0.5, sample_mode='uniform', transform=None):
@@ -192,7 +212,7 @@ class FewShotSampler(object):
                 test_ims.append(torch.stack(char_ims[self._n_train:]))
             train_ims = torch.stack(train_ims)
             test_ims = torch.stack(test_ims)
-            labels = torch.tensor(chars)[:, None]
+            labels = torch.tensor(chars).unsqueeze(-1)
             # Add to batch.
             batch_train_ims.append(train_ims)
             batch_test_ims.append(test_ims)

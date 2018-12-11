@@ -48,6 +48,9 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (1.0,)),
     ])
+    if args.rotate:
+        logger.info('add rotations to training set')
+        dataset_train = data.add_rotations(dataset_train)
 
     if args.train_mode == 'pair':
         examples = data.PairSampler(
@@ -203,6 +206,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--download', action='store_true')
     parser.add_argument('--device', default='cuda')
+    parser.add_argument('--rotate', type=util.strtobool, default=False)
     parser.add_argument('--arch', default='vinyals')
     parser.add_argument('--apply_method', default='Nearest',
                         choices=['Nearest', 'ProtoNet', 'KRR'])
